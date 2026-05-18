@@ -12,6 +12,9 @@ dist/
 .gradle/
 build/
 
+# Preview browser profiles
+ui-preview/_edge-profile/
+
 # OS
 .DS_Store
 Thumbs.db

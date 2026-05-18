@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>英语电影听力 UI 预览</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #050504;
+      --screen: #0b0b09;
+      --surface: #151410;
+      --surface-strong: #1d1a15;
+      --surface-soft: #11100d;
+      --line: #2b2821;
+      --line-soft: #1f1d18;
+      --text: #f1ece2;
+      --text-soft: #cfc6b8;
+      --muted: #8f887b;
+      --faint: #665f53;
+      --ghost: #474138;
+      --accent: #d2ad67;
+      --accent-2: #9eb39a;
+      --accent-soft: rgba(210, 173, 103, 0.13);
+      --danger: #d78380;
+      --radius: 16px;
+      --shadow: 0 30px 90px rgba(0, 0, 0, 0.54);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(180deg, #0b0b09 0%, #050504 100%);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button {
+      border: 0;
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
+    }
+
+    .stage {
+      width: min(100vw, 460px);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+    }
+
+    .phone {
+      width: min(100%, 420px);
+      height: min(900px, calc(100vh - 36px));
+      min-height: 720px;
+      overflow: auto;
+      border: 1px solid rgba(222, 211, 192, 0.13);
+      border-radius: 34px;
+      background: var(--screen);
+      box-shadow: var(--shadow);
+      scrollbar-width: none;
+    }
+
+    .phone::-webkit-scrollbar {
+      display: none;
+    }
+
+    .screen {
+      min-height: 100%;
+      padding: 20px 16px 28px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .metric {
+      padding: 12px 13px;
+      border: 1px solid var(--line-soft);
+      border-radius: 15px;
+      background: rgba(21, 20, 16, 0.78);
+    }
+
+    .metric-label {
+      color: var(--faint);
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    .metric-value {
+      margin-top: 6px;
+      font-size: 17px;
+      line-height: 1.05;
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .now-playing {
+      margin-top: 18px;
+      min-width: 0;
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .signal {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      box-shadow: 0 0 14px rgba(158, 179, 154, 0.48);
+      flex: 0 0 auto;
+    }
+
+    .track-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 17px;
+      line-height: 1.25;
+      font-weight: 760;
+    }
+
+    .track-note {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .timeline {
+      margin-top: 17px;
+    }
+
+    .progress {
+      height: 5px;
+      border-radius: 999px;
+      background: #242119;
+      overflow: hidden;
+    }
+
+    .progress span {
+      display: block;
+      width: 43%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    }
+
+    .time-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .transport {
+      display: grid;
+      grid-template-columns: 1fr 1fr 68px 1fr 1fr;
+      gap: 8px;
+      align-items: center;
+      margin-top: 14px;
+    }
+
+    .jump {
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .play {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 68px;
+      height: 68px;
+      border-radius: 50%;
+      background: linear-gradient(145deg, var(--accent), var(--accent-2));
+      color: #11100c;
+      box-shadow: 0 16px 34px rgba(210, 173, 103, 0.17);
+    }
+
+    .play-icon {
+      position: relative;
+      display: block;
+      width: 24px;
+      height: 24px;
+    }
+
+    .play-icon::before,
+    .play-icon::after {
+      content: "";
+      position: absolute;
+      background: #11100c;
+      transition: 180ms ease;
+    }
+
+    .play.is-playing .play-icon::before,
+    .play.is-playing .play-icon::after {
+      top: 2px;
+      width: 6px;
+      height: 20px;
+      border-radius: 4px;
+    }
+
+    .play.is-playing .play-icon::before {
+      left: 5px;
+    }
+
+    .play.is-playing .play-icon::after {
+      right: 5px;
+    }
+
+    .play:not(.is-playing) .play-icon::before {
+      left: 7px;
+      top: 3px;
+      width: 0;
+      height: 0;
+      border-top: 9px solid transparent;
+      border-bottom: 9px solid transparent;
+      border-left: 15px solid #11100c;
+      background: transparent;
+    }
+
+    .play:not(.is-playing) .play-icon::after {
+      opacity: 0;
+    }
+
+    .reader {
+      position: relative;
+      margin-top: 22px;
+      min-height: 340px;
+      padding: 18px 0;
+      border-top: 1px solid var(--line-soft);
+      border-bottom: 1px solid var(--line-soft);
+      overflow: hidden;
+    }
+
+    .reader::before,
+    .reader::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 48px;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    .reader::before {
+      top: 0;
+      background: linear-gradient(180deg, var(--screen), rgba(11, 11, 9, 0));
+    }
+
+    .reader::after {
+      bottom: 0;
+      background: linear-gradient(0deg, var(--screen), rgba(11, 11, 9, 0));
+    }
+
+    .subtitle-meta {
+      position: relative;
+      z-index: 3;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+      text-align: center;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-bottom: 12px;
+    }
+
+    .subtitle-stack {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      align-content: center;
+      gap: 8px;
+      min-height: 270px;
+    }
+
+    .cue {
+      position: relative;
+      width: 100%;
+      padding: 7px 12px;
+      border-radius: 13px;
+      background: transparent;
+      text-align: center;
+      line-height: 1.38;
+      overflow: visible;
+    }
+
+    .cue.level-3 {
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    .cue.level-2 {
+      color: var(--ghost);
+      font-size: 13px;
+    }
+
+    .cue.level-1 {
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .cue.current {
+      isolation: isolate;
+      padding: 17px 14px;
+      border: 0;
+      background:
+        radial-gradient(ellipse at center, rgba(210, 173, 103, 0.18) 0%, rgba(210, 173, 103, 0.1) 34%, rgba(158, 179, 154, 0.055) 58%, transparent 84%),
+        linear-gradient(90deg, transparent 0%, rgba(210, 173, 103, 0.085) 25%, rgba(158, 179, 154, 0.075) 50%, rgba(210, 173, 103, 0.085) 75%, transparent 100%);
+      color: var(--text);
+      font-size: 22px;
+      font-weight: 780;
+      text-shadow: 0 0 24px rgba(241, 236, 226, 0.2), 0 0 42px rgba(210, 173, 103, 0.1);
+      box-shadow: 0 0 42px rgba(210, 173, 103, 0.045);
+    }
+
+    .cue:active {
+      color: var(--accent-2);
+    }
+
+    .tuning {
+      margin-top: 16px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .tune-panel {
+      padding: 11px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      background: rgba(21, 20, 16, 0.56);
+    }
+
+    .tune-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 10px;
+      margin-bottom: 9px;
+    }
+
+    .tune-title {
+      color: var(--text-soft);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .tune-value {
+      color: var(--accent);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .grid-5,
+    .grid-2 {
+      display: grid;
+      gap: 7px;
+    }
+
+    .grid-5 {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .grid-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .chip,
+    .manage,
+    .small-action {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-soft);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .chip.active {
+      border-color: rgba(210, 173, 103, 0.52);
+      background: rgba(210, 173, 103, 0.12);
+      color: var(--text);
+    }
+
+    .management {
+      margin-top: 16px;
+      padding: 11px;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      background: rgba(21, 20, 16, 0.42);
+    }
+
+    .manage {
+      min-height: 40px;
+      background: var(--surface);
+      color: var(--text-soft);
+    }
+
+    .library {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line-soft);
+    }
+
+    .section-title {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 720;
+    }
+
+    .file-card {
+      display: grid;
+      gap: 8px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(29, 26, 21, 0.74);
+      cursor: pointer;
+    }
+
+    .file-card + .file-card {
+      margin-top: 10px;
+    }
+
+    .file-card.active {
+      border-color: rgba(210, 173, 103, 0.38);
+      background: rgba(210, 173, 103, 0.09);
+    }
+
+    .file-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 14px;
+      font-weight: 730;
+    }
+
+    .file-meta,
+    .file-sub {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.36;
+    }
+
+    .file-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .small-action.danger {
+      color: var(--danger);
+    }
+
+    @media (max-width: 520px) {
+      .stage {
+        width: 100vw;
+        min-height: 100vh;
+        padding: 0;
+      }
+
+      .phone {
+        width: 100vw;
+        height: 100vh;
+        min-height: 100vh;
+        border: 0;
+        border-radius: 0;
+      }
+
+      .screen {
+        padding: 18px 15px 26px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <section class="phone" aria-label="英语电影听力播放器预览">
+      <div class="screen">
+        <section class="metrics" aria-label="收听统计">
+          <div class="metric">
+            <div class="metric-label">当前文件</div>
+            <div class="metric-value">01:42:18</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">总收听</div>
+            <div class="metric-value">18:07:42</div>
+          </div>
+        </section>
+
+        <section class="now-playing" aria-label="当前文件">
+          <div class="title-row">
+            <span class="signal" aria-hidden="true"></span>
+            <div class="track-title">Before Sunrise - Scene 03.mp3</div>
+          </div>
+          <div class="track-note">点击任意字幕跳转，切后台后继续播放并保存进度</div>
+        </section>
+
+        <section class="timeline" aria-label="播放进度">
+          <div class="progress" aria-hidden="true"><span id="progressBar"></span></div>
+          <div class="time-row">
+            <span id="currentTime">42:16</span>
+            <span>01:38:44</span>
+          </div>
+          <div class="transport">
+            <button class="jump" id="rewindLarge">-30s</button>
+            <button class="jump" id="rewindSmall">-10s</button>
+            <button class="play is-playing" id="playButton" aria-label="播放或暂停">
+              <span class="play-icon" aria-hidden="true"></span>
+            </button>
+            <button class="jump" id="forwardSmall">+10s</button>
+            <button class="jump" id="forwardLarge">+30s</button>
+          </div>
+        </section>
+
+        <section class="reader" aria-label="字幕阅读区">
+          <div class="subtitle-meta">字幕 scene-03.en.srt</div>
+          <div class="subtitle-stack" id="subtitleStack">
+            <button class="cue level-3" data-time="41:40">What if there's no one around to tell you that you're special?</button>
+            <button class="cue level-2" data-time="41:48">I think people have these romantic projections.</button>
+            <button class="cue level-1" data-time="41:58">I mean, isn't everything we do in life a way to be loved a little more?</button>
+            <button class="cue current" data-time="42:16">If there's any kind of magic in this world, it must be in the attempt of understanding someone.</button>
+            <button class="cue level-1" data-time="42:28">Sharing something. I know, it's almost impossible to succeed.</button>
+            <button class="cue level-2" data-time="42:37">But who cares, really?</button>
+            <button class="cue level-3" data-time="42:45">The answer must be in the attempt.</button>
+          </div>
+        </section>
+
+        <section class="tuning" aria-label="播放微调">
+          <div class="tune-panel">
+            <div class="tune-head">
+              <div class="tune-title">倍速</div>
+              <div class="tune-value" id="speedValue">1.00x</div>
+            </div>
+            <div class="grid-5" id="speedGroup">
+              <button class="chip">0.75x</button>
+              <button class="chip">0.90x</button>
+              <button class="chip active">1.00x</button>
+              <button class="chip">1.10x</button>
+              <button class="chip">1.25x</button>
+            </div>
+          </div>
+
+          <div class="tune-panel">
+            <div class="tune-head">
+              <div class="tune-title">字幕偏移</div>
+              <div class="tune-value" id="offsetValue">提前 0.9s</div>
+            </div>
+            <div class="grid-5">
+              <button class="chip" data-offset="-0.5">-0.5s</button>
+              <button class="chip" data-offset="-0.1">-0.1s</button>
+              <button class="chip" data-offset="reset">0</button>
+              <button class="chip" data-offset="0.1">+0.1s</button>
+              <button class="chip" data-offset="0.5">+0.5s</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="management" aria-label="文件管理">
+          <div class="grid-2">
+            <button class="manage">导入 MP3</button>
+            <button class="manage">导入字幕</button>
+            <button class="manage">备份数据</button>
+            <button class="manage">恢复数据</button>
+          </div>
+        </section>
+
+        <section class="library" aria-label="文件列表">
+          <h2 class="section-title">文件 2</h2>
+          <article class="file-card active">
+            <div class="file-title">Before Sunrise - Scene 03.mp3</div>
+            <div class="file-meta">进度 42:16 / 01:38:44 · 收听 01:42:18</div>
+            <div class="file-sub">字幕 scene-03.en.srt</div>
+            <div class="file-actions">
+              <button class="small-action">移除字幕</button>
+              <button class="small-action danger">删除</button>
+            </div>
+          </article>
+          <article class="file-card">
+            <div class="file-title">The Social Network - Opening.mp3</div>
+            <div class="file-meta">进度 08:21 / 32:10 · 收听 00:54:02</div>
+            <div class="file-sub">字幕 opening.en.srt</div>
+            <div class="file-actions">
+              <button class="small-action">移除字幕</button>
+              <button class="small-action danger">删除</button>
+            </div>
+          </article>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const playButton = document.querySelector("#playButton");
+    const progressBar = document.querySelector("#progressBar");
+    const currentTime = document.querySelector("#currentTime");
+    const speedValue = document.querySelector("#speedValue");
+    const offsetValue = document.querySelector("#offsetValue");
+    let playing = true;
+    let offset = 0.9;
+    let progress = 43;
+
+    playButton.addEventListener("click", () => {
+      playing = !playing;
+      playButton.classList.toggle("is-playing", playing);
+      playButton.setAttribute("aria-label", playing ? "暂停" : "播放");
+    });
+
+    document.querySelector("#rewindLarge").addEventListener("click", () => shiftProgress(-5));
+    document.querySelector("#rewindSmall").addEventListener("click", () => shiftProgress(-2));
+    document.querySelector("#forwardSmall").addEventListener("click", () => shiftProgress(2));
+    document.querySelector("#forwardLarge").addEventListener("click", () => shiftProgress(5));
+
+    function shiftProgress(delta) {
+      progress = Math.max(0, Math.min(100, progress + delta));
+      progressBar.style.width = `${progress}%`;
+    }
+
+    document.querySelectorAll("#speedGroup .chip").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll("#speedGroup .chip").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        speedValue.textContent = button.textContent;
+      });
+    });
+
+    document.querySelectorAll("[data-offset]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const value = button.dataset.offset;
+        offset = value === "reset" ? 0.9 : Math.max(-5, Math.min(5, offset + Number(value)));
+        offsetValue.textContent = offset === 0
+          ? "同步 0.0s"
+          : `${offset > 0 ? "提前" : "延后"} ${Math.abs(offset).toFixed(1)}s`;
+      });
+    });
+
+    document.querySelectorAll(".cue").forEach((cue) => {
+      cue.addEventListener("click", () => {
+        document.querySelectorAll(".cue").forEach((item) => {
+          item.classList.remove("current", "level-1", "level-2", "level-3");
+          item.classList.add("level-2");
+        });
+        cue.classList.remove("level-2");
+        cue.classList.add("current");
+        currentTime.textContent = cue.dataset.time;
+      });
+    });
+
+    document.querySelectorAll(".file-card").forEach((card) => {
+      card.addEventListener("click", (event) => {
+        if (event.target.tagName.toLowerCase() === "button") return;
+        document.querySelectorAll(".file-card").forEach((item) => item.classList.remove("active"));
+        card.classList.add("active");
+      });
+    });
+  </script>
+</body>
+</html>

@@ -50,7 +50,8 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
 
     private static final String CHANNEL_ID = "movie_audio_playback";
     private static final int NOTIFICATION_ID = 4201;
-    private static final long SEEK_STEP_MS = 15_000L;
+    private static final long SEEK_SMALL_STEP_MS = 10_000L;
+    private static final long SEEK_LARGE_STEP_MS = 30_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable ticker = new Runnable() {
@@ -460,12 +461,12 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
 
             @Override
             public void onFastForward() {
-                seekBy(SEEK_STEP_MS);
+                seekBy(SEEK_SMALL_STEP_MS);
             }
 
             @Override
             public void onRewind() {
-                seekBy(-SEEK_STEP_MS);
+                seekBy(-SEEK_SMALL_STEP_MS);
             }
         });
         mediaSession.setActive(true);
@@ -548,18 +549,20 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
             .setShowWhen(false)
             .setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .addAction(android.R.drawable.ic_media_rew, "-15", servicePendingIntent(ACTION_SEEK_RELATIVE, -SEEK_STEP_MS, 1))
+            .addAction(android.R.drawable.ic_media_rew, "-30", servicePendingIntent(ACTION_SEEK_RELATIVE, -SEEK_LARGE_STEP_MS, 1))
+            .addAction(android.R.drawable.ic_media_rew, "-10", servicePendingIntent(ACTION_SEEK_RELATIVE, -SEEK_SMALL_STEP_MS, 2))
             .addAction(
                 playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play,
                 playing ? "暂停" : "播放",
-                servicePendingIntent(playing ? ACTION_PAUSE : ACTION_PLAY, 0L, 2)
+                servicePendingIntent(playing ? ACTION_PAUSE : ACTION_PLAY, 0L, 3)
             )
-            .addAction(android.R.drawable.ic_media_ff, "+15", servicePendingIntent(ACTION_SEEK_RELATIVE, SEEK_STEP_MS, 3));
+            .addAction(android.R.drawable.ic_media_ff, "+10", servicePendingIntent(ACTION_SEEK_RELATIVE, SEEK_SMALL_STEP_MS, 4))
+            .addAction(android.R.drawable.ic_media_ff, "+30", servicePendingIntent(ACTION_SEEK_RELATIVE, SEEK_LARGE_STEP_MS, 5));
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && mediaSession != null) {
             builder.setStyle(new Notification.MediaStyle()
                 .setMediaSession(mediaSession.getSessionToken())
-                .setShowActionsInCompactView(0, 1, 2));
+                .setShowActionsInCompactView(1, 2, 3));
         }
         return builder.build();
     }

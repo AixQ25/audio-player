@@ -10,7 +10,13 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.database.Cursor;
+import android.graphics.Canvas;
+import android.graphics.LinearGradient;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -20,6 +26,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.OpenableColumns;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -31,6 +38,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -46,10 +54,27 @@ public final class MainActivity extends Activity {
     private static final long UI_TICK_MS = 200L;
     private static final long DEFAULT_SUBTITLE_OFFSET_MS = 900L;
     private static final int SUBTITLE_VISIBLE_RANGE = 3;
+    private static final int COLOR_BG = 0xFF050504;
+    private static final int COLOR_SCREEN = 0xFF0B0B09;
+    private static final int COLOR_SURFACE = 0xFF151410;
+    private static final int COLOR_SURFACE_STRONG = 0xFF1D1A15;
+    private static final int COLOR_SURFACE_SOFT = 0xFF11100D;
+    private static final int COLOR_LINE = 0xFF2B2821;
+    private static final int COLOR_LINE_SOFT = 0xFF1F1D18;
+    private static final int COLOR_TEXT = 0xFFF1ECE2;
+    private static final int COLOR_TEXT_SOFT = 0xFFCFC6B8;
+    private static final int COLOR_MUTED = 0xFF8F887B;
+    private static final int COLOR_FAINT = 0xFF665F53;
+    private static final int COLOR_GHOST = 0xFF474138;
+    private static final int COLOR_ACCENT = 0xFFD2AD67;
+    private static final int COLOR_ACCENT_2 = 0xFF9EB39A;
+    private static final int COLOR_ACCENT_SOFT = 0x21D2AD67;
+    private static final int COLOR_DANGER = 0xFFD78380;
 
     private TrackStore store;
     private ArrayList<Track> tracks = new ArrayList<>();
     private ArrayList<SubtitleCue> subtitleCues = new ArrayList<>();
+    private final ArrayList<Button> speedButtons = new ArrayList<>();
     private int lastSubtitleIndex = -1;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable uiTicker = new Runnable() {
@@ -83,7 +108,7 @@ public final class MainActivity extends Activity {
     private TextView libraryCount;
     private LinearLayout libraryList;
     private SeekBar progress;
-    private Button playPause;
+    private PlayPauseButton playPause;
 
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
         @Override
@@ -166,33 +191,55 @@ public final class MainActivity extends Activity {
     }
 
     private void buildUi() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            getWindow().setStatusBarColor(COLOR_SCREEN);
+            getWindow().setNavigationBarColor(COLOR_SCREEN);
+        }
+
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
-        scrollView.setBackgroundColor(0xFFF8FAFC);
+        scrollView.setBackgroundColor(COLOR_SCREEN);
         scrollView.setFitsSystemWindows(true);
 
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(18), dp(18), dp(18), dp(28));
+        page.setPadding(dp(15), dp(18), dp(15), dp(28));
         scrollView.addView(page, new ScrollView.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         ));
 
         LinearLayout stats = row();
-        fileListenTime = text("当前文件 00:00", 16, 0xFF111827, Typeface.BOLD);
-        totalListenTime = text("总收听 00:00", 16, 0xFF111827, Typeface.BOLD);
-        stats.addView(fileListenTime, weightParams());
-        stats.addView(totalListenTime, weightParams());
+        stats.setPadding(0, 0, 0, dp(6));
+        fileListenTime = text("00:00", 17, COLOR_TEXT, Typeface.BOLD);
+        totalListenTime = text("00:00", 17, COLOR_TEXT, Typeface.BOLD);
+        stats.addView(metricPanel("当前文件", fileListenTime), weightParams());
+        stats.addView(metricPanel("总收听", totalListenTime), weightParams());
         page.addView(stats);
 
-        currentTitle = text("还没有选择 MP3", 18, 0xFF111827, Typeface.BOLD);
-        currentTitle.setPadding(0, dp(18), 0, dp(8));
-        page.addView(currentTitle);
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        titleRow.setPadding(0, dp(13), 0, dp(8));
+        View signal = new View(this);
+        signal.setBackground(circleBackground(COLOR_ACCENT_2));
+        LinearLayout.LayoutParams signalParams = new LinearLayout.LayoutParams(dp(7), dp(7));
+        signalParams.setMargins(0, 0, dp(9), 0);
+        titleRow.addView(signal, signalParams);
+        currentTitle = text("还没有选择 MP3", 17, COLOR_TEXT, Typeface.BOLD);
+        currentTitle.setSingleLine(true);
+        currentTitle.setEllipsize(TextUtils.TruncateAt.END);
+        titleRow.addView(currentTitle, new LinearLayout.LayoutParams(
+            0,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            1f
+        ));
+        page.addView(titleRow);
 
         progress = new SeekBar(this);
         progress.setMax(100);
         progress.setProgress(0);
+        styleSeekBar(progress);
         progress.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int value, boolean fromUser) {
@@ -219,21 +266,36 @@ public final class MainActivity extends Activity {
         page.addView(progress);
 
         LinearLayout timeRow = row();
-        currentTime = text("00:00", 13, 0xFF475569, Typeface.NORMAL);
-        durationTime = text("00:00", 13, 0xFF475569, Typeface.NORMAL);
+        timeRow.setPadding(0, 0, 0, dp(4));
+        currentTime = text("00:00", 12, COLOR_MUTED, Typeface.NORMAL);
+        durationTime = text("00:00", 12, COLOR_MUTED, Typeface.NORMAL);
         durationTime.setGravity(Gravity.END);
         timeRow.addView(currentTime, weightParams());
         timeRow.addView(durationTime, weightParams());
         page.addView(timeRow);
 
         LinearLayout controls = row();
-        Button rewind = button("-15s");
-        playPause = button("播放");
-        Button forward = button("+15s");
-        rewind.setOnClickListener(new View.OnClickListener() {
+        controls.setPadding(0, dp(6), 0, dp(12));
+        Button rewindLarge = button("-30s");
+        Button rewindSmall = button("-10s");
+        playPause = new PlayPauseButton(this);
+        playPause.setContentDescription("播放");
+        Button forwardSmall = button("+10s");
+        Button forwardLarge = button("+30s");
+        rewindLarge.setTextSize(12);
+        rewindSmall.setTextSize(12);
+        forwardSmall.setTextSize(12);
+        forwardLarge.setTextSize(12);
+        rewindLarge.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                seekRelative(-15_000L);
+                seekRelative(-30_000L);
+            }
+        });
+        rewindSmall.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                seekRelative(-10_000L);
             }
         });
         playPause.setOnClickListener(new View.OnClickListener() {
@@ -242,51 +304,96 @@ public final class MainActivity extends Activity {
                 togglePlayback();
             }
         });
-        forward.setOnClickListener(new View.OnClickListener() {
+        forwardSmall.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                seekRelative(15_000L);
+                seekRelative(10_000L);
             }
         });
-        controls.addView(rewind, weightParams());
-        controls.addView(playPause, weightParams());
-        controls.addView(forward, weightParams());
+        forwardLarge.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                seekRelative(30_000L);
+            }
+        });
+        controls.addView(rewindLarge, controlButtonParams());
+        controls.addView(rewindSmall, controlButtonParams());
+        controls.addView(playPause, playButtonParams());
+        controls.addView(forwardSmall, controlButtonParams());
+        controls.addView(forwardLarge, controlButtonParams());
         page.addView(controls);
 
-        speedValue = text("倍速 1.00x", 14, 0xFF111827, Typeface.BOLD);
-        speedValue.setPadding(0, dp(10), 0, dp(2));
-        page.addView(speedValue);
+        LinearLayout reader = new LinearLayout(this);
+        reader.setOrientation(LinearLayout.VERTICAL);
+        reader.setPadding(0, dp(14), 0, dp(14));
+        reader.setBackground(sectionBackground());
+        subtitleStatus = text("当前文件未导入字幕", 12, COLOR_MUTED, Typeface.NORMAL);
+        subtitleStatus.setGravity(Gravity.CENTER);
+        subtitleStatus.setSingleLine(true);
+        subtitleStatus.setEllipsize(TextUtils.TruncateAt.END);
+        subtitleStatus.setPadding(dp(10), 0, dp(10), dp(10));
+        reader.addView(subtitleStatus);
 
+        subtitleScrollView = new ScrollView(this);
+        subtitleScrollView.setFillViewport(true);
+        subtitleScrollView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        subtitleScrollView.setPadding(0, 0, 0, 0);
+        subtitleList = new LinearLayout(this);
+        subtitleList.setOrientation(LinearLayout.VERTICAL);
+        subtitleList.setGravity(Gravity.CENTER_VERTICAL);
+        subtitleList.setMinimumHeight(dp(286));
+        subtitleScrollView.addView(subtitleList, new ScrollView.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        reader.addView(subtitleScrollView, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(300)
+        ));
+        page.addView(reader, fullWidthMargins(0, dp(8), 0, dp(16)));
+
+        LinearLayout speedPanel = panel();
+        LinearLayout speedHead = headRow();
+        TextView speedTitle = text("倍速", 12, COLOR_TEXT_SOFT, Typeface.BOLD);
+        speedValue = text("1.00x", 12, COLOR_ACCENT, Typeface.NORMAL);
+        speedValue.setGravity(Gravity.END);
+        speedHead.addView(speedTitle, weightParams());
+        speedHead.addView(speedValue, weightParams());
+        speedPanel.addView(speedHead);
         LinearLayout speedRow = row();
+        speedRow.setPadding(0, 0, 0, 0);
+        speedButtons.clear();
         float[] speeds = new float[]{0.75f, 0.90f, 1.0f, 1.10f, 1.25f};
         for (final float speed : speeds) {
-            Button speedButton = button(String.format(Locale.US, "%.2fx", speed));
-            speedButton.setTextSize(12);
+            Button speedButton = chip(String.format(Locale.US, "%.2fx", speed));
+            speedButton.setTag(Float.valueOf(speed));
             speedButton.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
                     setPlaybackSpeed(speed);
                 }
             });
+            speedButtons.add(speedButton);
             speedRow.addView(speedButton, weightParams());
         }
-        page.addView(speedRow);
+        speedPanel.addView(speedRow);
+        page.addView(speedPanel, fullWidthMargins(0, 0, 0, dp(10)));
 
-        subtitleOffsetValue = text("字幕提前 0.9s", 14, 0xFF111827, Typeface.BOLD);
-        subtitleOffsetValue.setPadding(0, dp(12), 0, dp(2));
-        page.addView(subtitleOffsetValue);
-
+        LinearLayout offsetPanel = panel();
+        LinearLayout offsetHead = headRow();
+        TextView offsetTitle = text("字幕偏移", 12, COLOR_TEXT_SOFT, Typeface.BOLD);
+        subtitleOffsetValue = text("提前 0.9s", 12, COLOR_ACCENT, Typeface.NORMAL);
+        subtitleOffsetValue.setGravity(Gravity.END);
+        offsetHead.addView(offsetTitle, weightParams());
+        offsetHead.addView(subtitleOffsetValue, weightParams());
+        offsetPanel.addView(offsetHead);
         LinearLayout offsetRow = row();
-        Button offsetBackLarge = button("-0.5s");
-        Button offsetBackSmall = button("-0.1s");
-        Button offsetReset = button("0");
-        Button offsetAheadSmall = button("+0.1s");
-        Button offsetAheadLarge = button("+0.5s");
-        offsetBackLarge.setTextSize(12);
-        offsetBackSmall.setTextSize(12);
-        offsetReset.setTextSize(12);
-        offsetAheadSmall.setTextSize(12);
-        offsetAheadLarge.setTextSize(12);
+        offsetRow.setPadding(0, 0, 0, 0);
+        Button offsetBackLarge = chip("-0.5s");
+        Button offsetBackSmall = chip("-0.1s");
+        Button offsetReset = chip("0");
+        Button offsetAheadSmall = chip("+0.1s");
+        Button offsetAheadLarge = chip("+0.5s");
         offsetBackLarge.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -322,23 +429,12 @@ public final class MainActivity extends Activity {
         offsetRow.addView(offsetReset, weightParams());
         offsetRow.addView(offsetAheadSmall, weightParams());
         offsetRow.addView(offsetAheadLarge, weightParams());
-        page.addView(offsetRow);
+        offsetPanel.addView(offsetRow);
+        page.addView(offsetPanel, fullWidthMargins(0, 0, 0, dp(16)));
 
-        subtitleStatus = text("当前文件未导入字幕", 13, 0xFF64748B, Typeface.NORMAL);
-        subtitleStatus.setPadding(0, dp(18), 0, dp(8));
-        page.addView(subtitleStatus);
-
-        subtitleScrollView = new ScrollView(this);
-        subtitleScrollView.setLayoutParams(new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, dp(260)));
-        subtitleScrollView.setPadding(0, dp(4), 0, dp(4));
-
-        subtitleList = new LinearLayout(this);
-        subtitleList.setOrientation(LinearLayout.VERTICAL);
-        subtitleScrollView.addView(subtitleList);
-        page.addView(subtitleScrollView);
-
+        LinearLayout management = panel();
         LinearLayout importRow = row();
+        importRow.setPadding(0, 0, 0, dp(6));
         Button importAudio = button("导入 MP3");
         Button importSubtitle = button("导入字幕");
         importAudio.setOnClickListener(new View.OnClickListener() {
@@ -355,9 +451,10 @@ public final class MainActivity extends Activity {
         });
         importRow.addView(importAudio, weightParams());
         importRow.addView(importSubtitle, weightParams());
-        page.addView(importRow);
+        management.addView(importRow);
 
         LinearLayout dataRow = row();
+        dataRow.setPadding(0, 0, 0, 0);
         Button backupData = button("备份数据");
         Button restoreData = button("恢复数据");
         backupData.setOnClickListener(new View.OnClickListener() {
@@ -374,10 +471,11 @@ public final class MainActivity extends Activity {
         });
         dataRow.addView(backupData, weightParams());
         dataRow.addView(restoreData, weightParams());
-        page.addView(dataRow);
+        management.addView(dataRow);
+        page.addView(management, fullWidthMargins(0, 0, 0, dp(16)));
 
-        libraryCount = text("文件 0", 16, 0xFF111827, Typeface.BOLD);
-        libraryCount.setPadding(0, dp(24), 0, dp(8));
+        libraryCount = text("文件 0", 13, COLOR_MUTED, Typeface.BOLD);
+        libraryCount.setPadding(0, dp(2), 0, dp(10));
         page.addView(libraryCount);
 
         libraryList = new LinearLayout(this);
@@ -409,7 +507,7 @@ public final class MainActivity extends Activity {
         libraryList.removeAllViews();
 
         if (tracks.isEmpty()) {
-            TextView empty = text("还没有导入 MP3。", 15, 0xFF64748B, Typeface.NORMAL);
+            TextView empty = text("还没有导入 MP3。", 15, COLOR_MUTED, Typeface.NORMAL);
             empty.setPadding(0, dp(8), 0, dp(8));
             libraryList.addView(empty);
             return;
@@ -418,23 +516,27 @@ public final class MainActivity extends Activity {
         for (final Track track : tracks) {
             LinearLayout item = new LinearLayout(this);
             item.setOrientation(LinearLayout.VERTICAL);
-            item.setPadding(dp(12), dp(12), dp(12), dp(12));
+            item.setPadding(dp(13), dp(13), dp(13), dp(13));
             item.setBackground(cardBackground(track.id.equals(currentTrackId)));
 
-            TextView name = text(track.name, 16, 0xFF111827, Typeface.BOLD);
+            TextView name = text(track.name, 14, COLOR_TEXT, Typeface.BOLD);
+            name.setSingleLine(true);
+            name.setEllipsize(TextUtils.TruncateAt.END);
             TextView meta = text(
                 "进度 " + TimeFormat.clock(track.positionMs) + " / " + TimeFormat.clock(track.durationMs)
                     + "    收听 " + TimeFormat.clock(track.listenedMs),
                 13,
-                0xFF64748B,
+                COLOR_MUTED,
                 Typeface.NORMAL
             );
             TextView subtitle = text(
                 track.subtitleName == null || track.subtitleName.isEmpty() ? "未导入字幕" : "字幕 " + track.subtitleName,
                 13,
-                0xFF64748B,
+                COLOR_MUTED,
                 Typeface.NORMAL
             );
+            subtitle.setSingleLine(true);
+            subtitle.setEllipsize(TextUtils.TruncateAt.END);
             item.addView(name);
             item.addView(meta);
             item.addView(subtitle);
@@ -475,6 +577,7 @@ public final class MainActivity extends Activity {
                 actions.addView(removeSub, weightParams());
             }
             Button delete = button("删除");
+            delete.setTextColor(COLOR_DANGER);
             delete.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
@@ -499,9 +602,9 @@ public final class MainActivity extends Activity {
             ? (track == null ? "还没有选择 MP3" : track.name)
             : trackName;
         currentTitle.setText(title);
-        fileListenTime.setText("当前文件 " + TimeFormat.clock(fileListenedMs));
-        totalListenTime.setText("总收听 " + TimeFormat.clock(totalListenedMs));
-        playPause.setText(isPlaying ? "暂停" : "播放");
+        fileListenTime.setText(TimeFormat.clock(fileListenedMs));
+        totalListenTime.setText(TimeFormat.clock(totalListenedMs));
+        playPause.setPlaying(isPlaying);
         currentTime.setText(TimeFormat.clock(lastPositionMs));
         durationTime.setText(TimeFormat.clock(lastDurationMs));
         updateSpeedView();
@@ -561,37 +664,36 @@ public final class MainActivity extends Activity {
             int typeface;
             switch (distance) {
                 case 0:
-                    textSize = 20;
-                    textColor = 0xFF111827;
+                    textSize = 22;
+                    textColor = COLOR_TEXT;
                     typeface = Typeface.BOLD;
                     break;
                 case 1:
                     textSize = 15;
-                    textColor = 0xFF64748B;
+                    textColor = COLOR_MUTED;
                     typeface = Typeface.NORMAL;
                     break;
                 case 2:
                     textSize = 13;
-                    textColor = 0xFF94A3B8;
+                    textColor = COLOR_GHOST;
                     typeface = Typeface.NORMAL;
                     break;
                 default:
                     textSize = 12;
-                    textColor = 0xFFCBD5E1;
+                    textColor = COLOR_FAINT;
                     typeface = Typeface.NORMAL;
                     break;
             }
 
             TextView item = text(cue.text, textSize, textColor, typeface);
             item.setGravity(Gravity.CENTER);
-            item.setPadding(dp(12), dp(8), dp(12), dp(8));
+            item.setPadding(dp(12), distance == 0 ? dp(13) : dp(7), dp(12), distance == 0 ? dp(13) : dp(7));
             item.setLineSpacing(dp(2), 1.0f);
             if (distance == 0) {
-                GradientDrawable bg = new GradientDrawable();
-                bg.setColor(0xFFEFF6FF);
-                bg.setCornerRadius(dp(8));
-                bg.setStroke(dp(1), 0xFF2563EB);
-                item.setBackground(bg);
+                item.setPadding(dp(12), dp(17), dp(12), dp(17));
+                item.setBackground(currentCueBackground());
+                item.setShadowLayer(dp(10), 0, 0, 0x33F1ECE2);
+                item.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
             }
             item.setClickable(true);
             final SubtitleCue clickCue = cue;
@@ -647,7 +749,13 @@ public final class MainActivity extends Activity {
         if (speedValue == null) {
             return;
         }
-        speedValue.setText(String.format(Locale.US, "倍速 %.2fx", currentPlaybackSpeed()));
+        float currentSpeed = currentPlaybackSpeed();
+        speedValue.setText(String.format(Locale.US, "%.2fx", currentSpeed));
+        for (Button button : speedButtons) {
+            Object tag = button.getTag();
+            boolean active = tag instanceof Float && Math.abs(((Float) tag).floatValue() - currentSpeed) < 0.01f;
+            styleChip(button, active);
+        }
     }
 
     private void updateSubtitleOffsetView() {
@@ -656,11 +764,11 @@ public final class MainActivity extends Activity {
         }
         long offsetMs = currentSubtitleOffsetMs();
         if (offsetMs == 0L) {
-            subtitleOffsetValue.setText("字幕同步 0.0s");
+            subtitleOffsetValue.setText("同步 0.0s");
             return;
         }
         String direction = offsetMs > 0L ? "提前" : "延后";
-        subtitleOffsetValue.setText(String.format(Locale.US, "字幕%s %.1fs", direction, Math.abs(offsetMs) / 1000.0));
+        subtitleOffsetValue.setText(String.format(Locale.US, "%s %.1fs", direction, Math.abs(offsetMs) / 1000.0));
     }
 
     private long currentSubtitleOffsetMs() {
@@ -1107,9 +1215,57 @@ public final class MainActivity extends Activity {
         return row;
     }
 
+    private LinearLayout headRow() {
+        LinearLayout row = row();
+        row.setPadding(0, 0, 0, dp(9));
+        return row;
+    }
+
+    private LinearLayout panel() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(11), dp(11), dp(11), dp(11));
+        panel.setBackground(roundedBackground(0x8F151410, COLOR_LINE_SOFT, 16));
+        return panel;
+    }
+
+    private LinearLayout metricPanel(String label, TextView value) {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(13), dp(12), dp(13), dp(12));
+        panel.setBackground(roundedBackground(0xC7151410, COLOR_LINE_SOFT, 15));
+
+        TextView labelView = text(label, 11, COLOR_FAINT, Typeface.NORMAL);
+        value.setPadding(0, dp(4), 0, 0);
+        panel.addView(labelView);
+        panel.addView(value);
+        return panel;
+    }
+
     private LinearLayout.LayoutParams weightParams() {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         params.setMargins(dp(3), 0, dp(3), 0);
+        return params;
+    }
+
+    private LinearLayout.LayoutParams controlButtonParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        params.setMargins(dp(4), 0, dp(4), 0);
+        return params;
+    }
+
+    private LinearLayout.LayoutParams playButtonParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(64), dp(64));
+        params.setMargins(dp(4), 0, dp(4), 0);
+        return params;
+    }
+
+    private LinearLayout.LayoutParams fullWidthMargins(int left, int top, int right, int bottom) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        params.setMargins(left, top, right, bottom);
         return params;
     }
 
@@ -1118,25 +1274,177 @@ public final class MainActivity extends Activity {
         textView.setText(value);
         textView.setTextSize(sp);
         textView.setTextColor(color);
-        textView.setTypeface(Typeface.DEFAULT, style);
+        textView.setTypeface(appTypeface(style));
         textView.setLineSpacing(dp(2), 1.0f);
         return textView;
+    }
+
+    private Typeface appTypeface(int style) {
+        String[] candidates = new String[]{
+            "/system/fonts/MiSansVF.ttf",
+            "/system/fonts/NotoSansCJK-Regular.ttc",
+            "/system/fonts/Roboto-Regular.ttf"
+        };
+        for (String path : candidates) {
+            try {
+                if (new File(path).exists()) {
+                    return Typeface.create(Typeface.createFromFile(path), style);
+                }
+            } catch (RuntimeException ignored) {
+                // Try the next system font.
+            }
+        }
+        return Typeface.create("sans-serif", style);
     }
 
     private Button button(String value) {
         Button button = new Button(this);
         button.setText(value);
         button.setAllCaps(false);
-        button.setMinHeight(dp(42));
+        button.setTextColor(COLOR_TEXT_SOFT);
+        button.setTextSize(12);
+        button.setTypeface(appTypeface(Typeface.NORMAL));
+        button.setGravity(Gravity.CENTER);
+        button.setIncludeFontPadding(false);
+        button.setMinHeight(dp(40));
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setPadding(dp(4), 0, dp(4), 0);
+        button.setBackground(roundedBackground(COLOR_SURFACE, COLOR_LINE, 12));
         return button;
+    }
+
+    private Button chip(String value) {
+        Button button = button(value);
+        button.setMinHeight(dp(36));
+        styleChip(button, false);
+        return button;
+    }
+
+    private void styleChip(Button button, boolean active) {
+        button.setTextColor(active ? COLOR_TEXT : COLOR_MUTED);
+        button.setBackground(roundedBackground(
+            active ? COLOR_ACCENT_SOFT : COLOR_SURFACE_SOFT,
+            active ? 0x85D2AD67 : COLOR_LINE,
+            12
+        ));
+    }
+
+    private void styleSeekBar(SeekBar seekBar) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            seekBar.setProgressTintList(ColorStateList.valueOf(COLOR_ACCENT));
+            seekBar.setProgressBackgroundTintList(ColorStateList.valueOf(0xFF242119));
+            seekBar.setThumbTintList(ColorStateList.valueOf(COLOR_ACCENT_2));
+        }
     }
 
     private GradientDrawable cardBackground(boolean active) {
         GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(active ? 0xFFEFF6FF : 0xFFFFFFFF);
-        drawable.setCornerRadius(dp(8));
-        drawable.setStroke(dp(1), active ? 0xFF2563EB : 0xFFE2E8F0);
+        drawable.setColor(active ? 0x17D2AD67 : 0xBD1D1A15);
+        drawable.setCornerRadius(dp(16));
+        drawable.setStroke(dp(1), active ? 0x61D2AD67 : COLOR_LINE);
         return drawable;
+    }
+
+    private GradientDrawable currentCueBackground() {
+        GradientDrawable drawable = new GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            new int[]{
+                0x00000000,
+                0x16D2AD67,
+                0x149EB39A,
+                0x16D2AD67,
+                0x00000000
+            }
+        );
+        drawable.setCornerRadius(dp(28));
+        return drawable;
+    }
+
+    private GradientDrawable sectionBackground() {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(COLOR_SCREEN);
+        drawable.setCornerRadius(dp(2));
+        drawable.setStroke(dp(1), COLOR_LINE_SOFT);
+        return drawable;
+    }
+
+    private GradientDrawable circleBackground(int color) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setShape(GradientDrawable.OVAL);
+        drawable.setColor(color);
+        return drawable;
+    }
+
+    private GradientDrawable roundedBackground(int color, int strokeColor, int radiusDp) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(radiusDp));
+        drawable.setStroke(dp(1), strokeColor);
+        return drawable;
+    }
+
+    private final class PlayPauseButton extends View {
+        private final Paint circlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path playPath = new Path();
+        private boolean playing;
+
+        PlayPauseButton(Context context) {
+            super(context);
+            setClickable(true);
+            setFocusable(true);
+            setMinimumWidth(dp(64));
+            setMinimumHeight(dp(64));
+            iconPaint.setColor(0xFF11100C);
+            iconPaint.setStyle(Paint.Style.FILL);
+        }
+
+        void setPlaying(boolean nextPlaying) {
+            playing = nextPlaying;
+            setContentDescription(playing ? "暂停" : "播放");
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            int size = Math.min(getWidth(), getHeight());
+            float centerX = getWidth() / 2f;
+            float centerY = getHeight() / 2f;
+            float radius = size / 2f;
+
+            circlePaint.setShader(new LinearGradient(
+                centerX - radius,
+                centerY - radius,
+                centerX + radius,
+                centerY + radius,
+                COLOR_ACCENT,
+                COLOR_ACCENT_2,
+                Shader.TileMode.CLAMP
+            ));
+            canvas.drawCircle(centerX, centerY, radius, circlePaint);
+            circlePaint.setShader(null);
+
+            if (playing) {
+                float barWidth = dp(6);
+                float barHeight = dp(22);
+                float gap = dp(6);
+                float top = centerY - barHeight / 2f;
+                float left = centerX - gap / 2f - barWidth;
+                float right = centerX + gap / 2f;
+                canvas.drawRoundRect(left, top, left + barWidth, top + barHeight, dp(3), dp(3), iconPaint);
+                canvas.drawRoundRect(right, top, right + barWidth, top + barHeight, dp(3), dp(3), iconPaint);
+                return;
+            }
+
+            playPath.reset();
+            playPath.moveTo(centerX - dp(6), centerY - dp(11));
+            playPath.lineTo(centerX - dp(6), centerY + dp(11));
+            playPath.lineTo(centerX + dp(12), centerY);
+            playPath.close();
+            canvas.drawPath(playPath, iconPaint);
+        }
     }
 
     private int dp(int value) {
