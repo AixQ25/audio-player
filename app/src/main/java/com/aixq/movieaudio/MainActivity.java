@@ -45,10 +45,12 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_RESTORE = 1005;
     private static final long UI_TICK_MS = 200L;
     private static final long DEFAULT_SUBTITLE_OFFSET_MS = 900L;
+    private static final int SUBTITLE_VISIBLE_RANGE = 3;
 
     private TrackStore store;
     private ArrayList<Track> tracks = new ArrayList<>();
     private ArrayList<SubtitleCue> subtitleCues = new ArrayList<>();
+    private int lastSubtitleIndex = -1;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable uiTicker = new Runnable() {
         @Override
@@ -76,9 +78,8 @@ public final class MainActivity extends Activity {
     private TextView subtitleStatus;
     private TextView subtitleOffsetValue;
     private TextView speedValue;
-    private TextView subtitlePrev;
-    private TextView subtitleCurrent;
-    private TextView subtitleNext;
+    private ScrollView subtitleScrollView;
+    private LinearLayout subtitleList;
     private TextView libraryCount;
     private LinearLayout libraryList;
     private SeekBar progress;
@@ -168,6 +169,7 @@ public final class MainActivity extends Activity {
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
         scrollView.setBackgroundColor(0xFFF8FAFC);
+        scrollView.setFitsSystemWindows(true);
 
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
@@ -176,13 +178,6 @@ public final class MainActivity extends Activity {
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         ));
-
-        TextView title = text("英语电影听力", 24, 0xFF111827, Typeface.BOLD);
-        page.addView(title);
-
-        TextView note = text("导入 MP3 和字幕，专注保存进度与收听时间。", 14, 0xFF64748B, Typeface.NORMAL);
-        note.setPadding(0, dp(4), 0, dp(16));
-        page.addView(note);
 
         LinearLayout stats = row();
         fileListenTime = text("当前文件 00:00", 16, 0xFF111827, Typeface.BOLD);
@@ -282,11 +277,11 @@ public final class MainActivity extends Activity {
         page.addView(subtitleOffsetValue);
 
         LinearLayout offsetRow = row();
-        Button offsetBackLarge = button("延后 0.5s");
-        Button offsetBackSmall = button("延后 0.1s");
-        Button offsetReset = button("重置");
-        Button offsetAheadSmall = button("提前 0.1s");
-        Button offsetAheadLarge = button("提前 0.5s");
+        Button offsetBackLarge = button("-0.5s");
+        Button offsetBackSmall = button("-0.1s");
+        Button offsetReset = button("0");
+        Button offsetAheadSmall = button("+0.1s");
+        Button offsetAheadLarge = button("+0.5s");
         offsetBackLarge.setTextSize(12);
         offsetBackSmall.setTextSize(12);
         offsetReset.setTextSize(12);
@@ -333,18 +328,15 @@ public final class MainActivity extends Activity {
         subtitleStatus.setPadding(0, dp(18), 0, dp(8));
         page.addView(subtitleStatus);
 
-        subtitlePrev = text("", 15, 0xFF94A3B8, Typeface.NORMAL);
-        subtitleCurrent = text("导入字幕后，这里会显示当前台词。", 21, 0xFF111827, Typeface.BOLD);
-        subtitleNext = text("", 15, 0xFF94A3B8, Typeface.NORMAL);
-        subtitlePrev.setGravity(Gravity.CENTER);
-        subtitleCurrent.setGravity(Gravity.CENTER);
-        subtitleNext.setGravity(Gravity.CENTER);
-        subtitlePrev.setPadding(0, dp(8), 0, dp(8));
-        subtitleCurrent.setPadding(0, dp(12), 0, dp(12));
-        subtitleNext.setPadding(0, dp(8), 0, dp(8));
-        page.addView(subtitlePrev);
-        page.addView(subtitleCurrent);
-        page.addView(subtitleNext);
+        subtitleScrollView = new ScrollView(this);
+        subtitleScrollView.setLayoutParams(new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(260)));
+        subtitleScrollView.setPadding(0, dp(4), 0, dp(4));
+
+        subtitleList = new LinearLayout(this);
+        subtitleList.setOrientation(LinearLayout.VERTICAL);
+        subtitleScrollView.addView(subtitleList);
+        page.addView(subtitleScrollView);
 
         LinearLayout importRow = row();
         Button importAudio = button("导入 MP3");
@@ -447,11 +439,8 @@ public final class MainActivity extends Activity {
             item.addView(meta);
             item.addView(subtitle);
 
-            LinearLayout actions = row();
-            Button play = button(track.id.equals(currentTrackId) && isPlaying ? "播放中" : "播放");
-            Button select = button("选择");
-            Button delete = button("删除");
-            play.setOnClickListener(new View.OnClickListener() {
+            item.setClickable(true);
+            item.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
                     currentTrackId = track.id;
@@ -461,24 +450,37 @@ public final class MainActivity extends Activity {
                     loadTrack(track.id, true);
                 }
             });
-            select.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View view) {
-                    currentTrackId = track.id;
-                    store.setCurrentTrackId(track.id);
-                    parseCurrentSubtitle();
-                    renderLibrary();
-                    loadTrack(track.id, false);
-                }
-            });
+
+            LinearLayout actions = row();
+            if (track.subtitleName != null && !track.subtitleName.isEmpty()) {
+                Button removeSub = button("移除字幕");
+                removeSub.setTextSize(12);
+                removeSub.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View view) {
+                        track.subtitleUri = "";
+                        track.subtitleName = "";
+                        track.subtitleOffsetMs = DEFAULT_SUBTITLE_OFFSET_MS;
+                        track.updatedAt = System.currentTimeMillis();
+                        store.upsert(track);
+                        if (currentTrackId.equals(track.id)) {
+                            subtitleCues.clear();
+                            lastSubtitleIndex = -1;
+                            updateSubtitle(lastPositionMs);
+                        }
+                        renderLibrary();
+                        toast("字幕已移除");
+                    }
+                });
+                actions.addView(removeSub, weightParams());
+            }
+            Button delete = button("删除");
             delete.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
                     confirmDelete(track);
                 }
             });
-            actions.addView(play, weightParams());
-            actions.addView(select, weightParams());
             actions.addView(delete, weightParams());
             item.addView(actions);
 
@@ -510,85 +512,109 @@ public final class MainActivity extends Activity {
 
     private void updateSubtitle(long positionMs) {
         Track track = currentTrack();
-        if (track == null) {
-            subtitleStatus.setText("当前文件未导入字幕");
-            subtitlePrev.setText("");
-            subtitleCurrent.setText("导入字幕后，这里会显示当前台词。");
-            subtitleNext.setText("");
-            clearSubtitleJumps();
-            return;
-        }
 
-        if (track.subtitleName == null || track.subtitleName.isEmpty()) {
+        if (track == null || track.subtitleName == null || track.subtitleName.isEmpty()) {
             subtitleStatus.setText("当前文件未导入字幕");
-            subtitlePrev.setText("");
-            subtitleCurrent.setText("导入字幕后，这里会显示当前台词。");
-            subtitleNext.setText("");
-            clearSubtitleJumps();
+            subtitleList.removeAllViews();
+            lastSubtitleIndex = -1;
             return;
         }
 
         subtitleStatus.setText("字幕 " + track.subtitleName);
+
         if (subtitleCues.isEmpty()) {
-            subtitlePrev.setText("");
-            subtitleCurrent.setText("字幕文件为空或无法解析。");
-            subtitleNext.setText("");
-            clearSubtitleJumps();
+            subtitleList.removeAllViews();
+            lastSubtitleIndex = -1;
             return;
         }
 
         long subtitlePositionMs = Math.max(0L, positionMs + currentSubtitleOffsetMs());
-        int index = SubtitleParser.findCurrentIndex(subtitleCues, subtitlePositionMs);
-        if (index >= 0) {
-            SubtitleCue prevCue = index > 0 ? subtitleCues.get(index - 1) : null;
-            SubtitleCue currentCue = subtitleCues.get(index);
-            SubtitleCue nextCue = index + 1 < subtitleCues.size() ? subtitleCues.get(index + 1) : null;
-            subtitlePrev.setText(prevCue == null ? "" : prevCue.text);
-            subtitleCurrent.setText(currentCue.text);
-            subtitleNext.setText(nextCue == null ? "" : nextCue.text);
-            bindSubtitleJump(subtitlePrev, prevCue);
-            bindSubtitleJump(subtitleCurrent, currentCue);
-            bindSubtitleJump(subtitleNext, nextCue);
-            return;
-        }
-
-        int nextIndex = -1;
-        for (int i = 0; i < subtitleCues.size(); i++) {
-            if (subtitleCues.get(i).startMs > subtitlePositionMs) {
-                nextIndex = i;
-                break;
+        int currentIndex = SubtitleParser.findCurrentIndex(subtitleCues, subtitlePositionMs);
+        if (currentIndex < 0) {
+            for (int i = 0; i < subtitleCues.size(); i++) {
+                if (subtitleCues.get(i).startMs > subtitlePositionMs) {
+                    currentIndex = Math.max(0, i - 1);
+                    break;
+                }
+            }
+            if (currentIndex < 0) {
+                currentIndex = subtitleCues.size() - 1;
             }
         }
-        SubtitleCue prevCue = nextIndex > 0 ? subtitleCues.get(nextIndex - 1) : null;
-        SubtitleCue nextCue = nextIndex >= 0 ? subtitleCues.get(nextIndex) : null;
-        subtitlePrev.setText(prevCue == null ? "" : prevCue.text);
-        subtitleCurrent.setText(" ");
-        subtitleNext.setText(nextCue == null ? "" : nextCue.text);
-        bindSubtitleJump(subtitlePrev, prevCue);
-        bindSubtitleJump(subtitleCurrent, null);
-        bindSubtitleJump(subtitleNext, nextCue);
-    }
 
-    private void clearSubtitleJumps() {
-        bindSubtitleJump(subtitlePrev, null);
-        bindSubtitleJump(subtitleCurrent, null);
-        bindSubtitleJump(subtitleNext, null);
-    }
-
-    private void bindSubtitleJump(TextView view, final SubtitleCue cue) {
-        if (view == null) {
+        if (currentIndex == lastSubtitleIndex && subtitleList.getChildCount() > 0) {
             return;
         }
-        if (cue == null) {
-            view.setClickable(false);
-            view.setOnClickListener(null);
-            return;
+        lastSubtitleIndex = currentIndex;
+
+        int start = Math.max(0, currentIndex - SUBTITLE_VISIBLE_RANGE);
+        int end = Math.min(subtitleCues.size() - 1, currentIndex + SUBTITLE_VISIBLE_RANGE);
+
+        subtitleList.removeAllViews();
+
+        for (int i = start; i <= end; i++) {
+            final SubtitleCue cue = subtitleCues.get(i);
+            int distance = Math.abs(i - currentIndex);
+
+            int textSize;
+            int textColor;
+            int typeface;
+            switch (distance) {
+                case 0:
+                    textSize = 20;
+                    textColor = 0xFF111827;
+                    typeface = Typeface.BOLD;
+                    break;
+                case 1:
+                    textSize = 15;
+                    textColor = 0xFF64748B;
+                    typeface = Typeface.NORMAL;
+                    break;
+                case 2:
+                    textSize = 13;
+                    textColor = 0xFF94A3B8;
+                    typeface = Typeface.NORMAL;
+                    break;
+                default:
+                    textSize = 12;
+                    textColor = 0xFFCBD5E1;
+                    typeface = Typeface.NORMAL;
+                    break;
+            }
+
+            TextView item = text(cue.text, textSize, textColor, typeface);
+            item.setGravity(Gravity.CENTER);
+            item.setPadding(dp(12), dp(8), dp(12), dp(8));
+            item.setLineSpacing(dp(2), 1.0f);
+            if (distance == 0) {
+                GradientDrawable bg = new GradientDrawable();
+                bg.setColor(0xFFEFF6FF);
+                bg.setCornerRadius(dp(8));
+                bg.setStroke(dp(1), 0xFF2563EB);
+                item.setBackground(bg);
+            }
+            item.setClickable(true);
+            final SubtitleCue clickCue = cue;
+            item.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    seekToSubtitle(clickCue);
+                }
+            });
+            subtitleList.addView(item);
         }
-        view.setClickable(true);
-        view.setOnClickListener(new View.OnClickListener() {
+
+        final int scrollIndex = currentIndex;
+        subtitleScrollView.post(new Runnable() {
             @Override
-            public void onClick(View clickedView) {
-                seekToSubtitle(cue);
+            public void run() {
+                View target = subtitleList.getChildAt(scrollIndex - start);
+                if (target != null) {
+                    int scrollY = target.getTop()
+                        - (subtitleScrollView.getHeight() / 2)
+                        + (target.getHeight() / 2);
+                    subtitleScrollView.smoothScrollTo(0, Math.max(0, scrollY));
+                }
             }
         });
     }
@@ -890,6 +916,7 @@ public final class MainActivity extends Activity {
                 track.updatedAt = System.currentTimeMillis();
                 store.upsert(track);
                 subtitleCues = cues;
+                lastSubtitleIndex = -1;
                 renderLibrary();
                 updateSubtitle(lastPositionMs);
                 toast("已导入 " + cues.size() + " 条字幕");
@@ -903,6 +930,7 @@ public final class MainActivity extends Activity {
 
     private void parseCurrentSubtitle() {
         subtitleCues.clear();
+        lastSubtitleIndex = -1;
         Track track = currentTrack();
         if (track == null || track.subtitleUri == null || track.subtitleUri.isEmpty()) {
             updateSubtitle(lastPositionMs);
