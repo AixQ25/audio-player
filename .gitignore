@@ -1,0 +1,17 @@
+# Build outputs
+dist/
+*.apk
+*.idsig
+
+# Keystore
+*.keystore
+
+# IDE
+.idea/
+*.iml
+.gradle/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
