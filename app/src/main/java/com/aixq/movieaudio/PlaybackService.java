@@ -5,8 +5,10 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
@@ -79,6 +81,15 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
     private long lastListenClockMs;
     private String lastError = "";
 
+    private final BroadcastReceiver noisyReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
+                pausePlayback();
+            }
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -86,6 +97,7 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         createNotificationChannel();
         createMediaSession();
+        registerReceiver(noisyReceiver, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
     }
 
     @Override
@@ -123,6 +135,11 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
         handler.removeCallbacks(ticker);
         releasePlayer();
         abandonAudioFocus();
+        try {
+            unregisterReceiver(noisyReceiver);
+        } catch (IllegalArgumentException ignored) {
+            // Receiver might not be registered yet.
+        }
         if (mediaSession != null) {
             mediaSession.setActive(false);
             mediaSession.release();
