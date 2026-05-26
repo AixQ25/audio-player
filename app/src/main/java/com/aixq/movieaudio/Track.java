@@ -14,7 +14,7 @@ public final class Track {
     public long durationMs = 0L;
     public long positionMs = 0L;
     public long listenedMs = 0L;
-    public long subtitleOffsetMs = 900L;
+    public long subtitleOffsetMs = 0L;
     public float playbackSpeed = 1.0f;
 
     public static Track fromJson(JSONObject json) {
@@ -29,7 +29,7 @@ public final class Track {
         track.durationMs = json.optLong("durationMs", 0L);
         track.positionMs = json.optLong("positionMs", 0L);
         track.listenedMs = json.optLong("listenedMs", 0L);
-        track.subtitleOffsetMs = json.optLong("subtitleOffsetMs", 900L);
+        track.subtitleOffsetMs = json.optLong("subtitleOffsetMs", 0L);
         track.playbackSpeed = (float) json.optDouble("playbackSpeed", 1.0);
         if (track.playbackSpeed < 0.5f || track.playbackSpeed > 2.0f) {
             track.playbackSpeed = 1.0f;

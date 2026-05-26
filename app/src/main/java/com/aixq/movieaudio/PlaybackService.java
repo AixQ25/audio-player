@@ -14,8 +14,6 @@ import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaMetadata;
-import android.media.MediaPlayer;
-import android.media.PlaybackParams;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.net.Uri;
@@ -23,9 +21,12 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.os.PowerManager;
 
-import java.io.IOException;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.PlaybackParameters;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
 
 public final class PlaybackService extends Service implements AudioManager.OnAudioFocusChangeListener {
     public static final String ACTION_LOAD = "com.aixq.movieaudio.LOAD";
@@ -70,7 +71,7 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
     };
 
     private TrackStore store;
-    private MediaPlayer player;
+    private ExoPlayer player;
     private MediaSession mediaSession;
     private AudioManager audioManager;
     private AudioFocusRequest focusRequest;
@@ -138,7 +139,6 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
         try {
             unregisterReceiver(noisyReceiver);
         } catch (IllegalArgumentException ignored) {
-            // Receiver might not be registered yet.
         }
         if (mediaSession != null) {
             mediaSession.setActive(false);
@@ -161,9 +161,9 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
         if (focusChange == AudioManager.AUDIOFOCUS_LOSS || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
             pausePlayback();
         } else if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK && player != null) {
-            player.setVolume(0.25f, 0.25f);
+            player.setVolume(0.25f);
         } else if (focusChange == AudioManager.AUDIOFOCUS_GAIN && player != null) {
-            player.setVolume(1f, 1f);
+            player.setVolume(1f);
         }
     }
 
@@ -183,76 +183,88 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
         pendingPlay = autoplay;
         lastError = "";
 
-        player = new MediaPlayer();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            player.setAudioAttributes(new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                .build());
-        } else {
-            player.setAudioStreamType(AudioManager.STREAM_MUSIC);
-        }
-        player.setWakeMode(getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
-        player.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+        player = new ExoPlayer.Builder(this)
+            .setAudioAttributes(
+                new androidx.media3.common.AudioAttributes.Builder()
+                    .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+                    .setContentType(androidx.media3.common.C.CONTENT_TYPE_SPEECH)
+                    .build(),
+                false
+            )
+            .setHandleAudioBecomingNoisy(true)
+            .build();
+
+        player.addListener(new Player.Listener() {
             @Override
-            public void onPrepared(MediaPlayer mediaPlayer) {
-                prepared = true;
-                long durationMs = Math.max(0L, mediaPlayer.getDuration());
-                long resumeMs = currentTrack == null ? 0L : Math.max(0L, currentTrack.positionMs);
-                if (durationMs > 0L && resumeMs > durationMs - 1000L) {
-                    resumeMs = 0L;
+            public void onPlaybackStateChanged(int state) {
+                if (state == Player.STATE_READY) {
+                    boolean firstReady = !prepared;
+                    if (firstReady) {
+                        prepared = true;
+                        long durationMs = Math.max(0L, player.getDuration());
+                        long resumeMs = currentTrack == null ? 0L : Math.max(0L, currentTrack.positionMs);
+                        if (durationMs > 0L && resumeMs > durationMs - 1000L) {
+                            resumeMs = 0L;
+                        }
+                        if (currentTrack != null) {
+                            currentTrack = store.updatePlayback(currentTrack.id, resumeMs, durationMs, 0L);
+                        }
+                        applyPlaybackSpeed(currentTrack == null ? 1.0f : currentTrack.playbackSpeed);
+                        if (resumeMs > 0L) {
+                            player.seekTo(resumeMs);
+                        }
+                    }
+                    updateMediaSession();
+                    publishState();
+                    if (player.isPlaying()) {
+                        if (lastListenClockMs <= 0L) {
+                            lastListenClockMs = android.os.SystemClock.elapsedRealtime();
+                        }
+                        handler.removeCallbacks(ticker);
+                        handler.post(ticker);
+                    }
+                    final boolean shouldPlay = pendingPlay;
+                    if (shouldPlay) {
+                        handler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                startPlayback();
+                            }
+                        });
+                    } else {
+                        refreshNotification(isActuallyPlaying());
+                    }
+                    return;
                 }
-                if (resumeMs > 0L) {
-                    mediaPlayer.seekTo((int) Math.min(resumeMs, Integer.MAX_VALUE));
-                }
-                currentTrack = store.updatePlayback(currentTrack.id, resumeMs, durationMs, 0L);
-                updateMediaSession();
-                publishState();
-                if (pendingPlay) {
-                    startPlayback();
-                } else {
+                if (state == Player.STATE_ENDED) {
+                    saveProgress(true);
+                    handler.removeCallbacks(ticker);
+                    lastListenClockMs = 0L;
+                    if (currentTrack != null) {
+                        currentTrack = store.updatePlayback(currentTrack.id, 0L, getDurationMs(), 0L);
+                    }
+                    updateMediaSession();
+                    publishState();
                     refreshNotification(false);
                 }
             }
-        });
-        player.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+
             @Override
-            public void onCompletion(MediaPlayer mediaPlayer) {
-                saveProgress(true);
-                handler.removeCallbacks(ticker);
-                lastListenClockMs = 0L;
-                if (currentTrack != null) {
-                    currentTrack = store.updatePlayback(currentTrack.id, 0L, getDurationMs(), 0L);
-                }
-                updateMediaSession();
-                publishState();
-                refreshNotification(false);
-            }
-        });
-        player.setOnErrorListener(new MediaPlayer.OnErrorListener() {
-            @Override
-            public boolean onError(MediaPlayer mediaPlayer, int what, int extra) {
+            public void onPlayerError(PlaybackException error) {
                 lastError = "播放失败，文件可能已被移动或权限失效";
                 handler.removeCallbacks(ticker);
                 lastListenClockMs = 0L;
                 updateMediaSession();
                 publishState();
                 refreshNotification(false);
-                return true;
             }
         });
 
-        try {
-            player.setDataSource(this, Uri.parse(track.audioUri));
-            player.prepareAsync();
-            publishState();
-            if (autoplay) {
-                refreshNotification(true);
-            }
-        } catch (IOException | RuntimeException error) {
-            lastError = "无法打开 MP3 文件";
-            releasePlayer();
-            publishState();
+        player.setMediaItem(MediaItem.fromUri(Uri.parse(track.audioUri)));
+        player.prepare();
+        publishState();
+        if (autoplay) {
+            refreshNotification(true);
         }
     }
 
@@ -279,20 +291,15 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
             publishState();
             return;
         }
-        try {
-            player.start();
-            applyPlaybackSpeed(currentTrack == null ? 1.0f : currentTrack.playbackSpeed);
-            pendingPlay = false;
-            lastListenClockMs = android.os.SystemClock.elapsedRealtime();
-            handler.removeCallbacks(ticker);
-            handler.post(ticker);
-            updateMediaSession();
-            publishState();
-            refreshNotification(true);
-        } catch (IllegalStateException error) {
-            lastError = "播放状态异常";
-            publishState();
-        }
+        player.play();
+        applyPlaybackSpeed(currentTrack == null ? 1.0f : currentTrack.playbackSpeed);
+        pendingPlay = false;
+        lastListenClockMs = android.os.SystemClock.elapsedRealtime();
+        handler.removeCallbacks(ticker);
+        handler.post(ticker);
+        updateMediaSession();
+        publishState();
+        refreshNotification(true);
     }
 
     private void pausePlayback() {
@@ -301,12 +308,8 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
             return;
         }
         saveProgress(true);
-        try {
-            if (player.isPlaying()) {
-                player.pause();
-            }
-        } catch (IllegalStateException ignored) {
-            // Keep service alive and let the next load recover.
+        if (player.getPlayWhenReady()) {
+            player.pause();
         }
         lastListenClockMs = 0L;
         handler.removeCallbacks(ticker);
@@ -329,17 +332,13 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
         if (durationMs > 0L) {
             nextMs = Math.min(nextMs, durationMs);
         }
-        try {
-            player.seekTo((int) Math.min(nextMs, Integer.MAX_VALUE));
-            if (currentTrack != null) {
-                currentTrack = store.updatePlayback(currentTrack.id, nextMs, durationMs, 0L);
-            }
-            updateMediaSession();
-            publishState();
-            refreshNotification(isActuallyPlaying());
-        } catch (IllegalStateException ignored) {
-            // Ignore stale seeks while a file is still preparing.
+        player.seekTo(nextMs);
+        if (currentTrack != null) {
+            currentTrack = store.updatePlayback(currentTrack.id, nextMs, durationMs, 0L);
         }
+        updateMediaSession();
+        publishState();
+        refreshNotification(isActuallyPlaying());
     }
 
     private void setPlaybackSpeed(float speed) {
@@ -359,16 +358,10 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
     }
 
     private void applyPlaybackSpeed(float speed) {
-        if (player == null || !prepared || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+        if (player == null || !prepared) {
             return;
         }
-        try {
-            PlaybackParams params = player.getPlaybackParams();
-            params.setSpeed(Math.max(0.5f, Math.min(2.0f, speed)));
-            player.setPlaybackParams(params);
-        } catch (IllegalStateException | IllegalArgumentException ignored) {
-            // Some devices reject params briefly around prepare/seek; the next load or speed change will reapply.
-        }
+        player.setPlaybackParameters(new PlaybackParameters(Math.max(0.5f, Math.min(2.0f, speed))));
     }
 
     private void saveProgress(boolean countListeningDelta) {
@@ -387,11 +380,7 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
     private void releasePlayer() {
         handler.removeCallbacks(ticker);
         if (player != null) {
-            try {
-                player.release();
-            } catch (RuntimeException ignored) {
-                // Release should never block recovery.
-            }
+            player.release();
         }
         player = null;
         prepared = false;
@@ -400,31 +389,19 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
     }
 
     private boolean isActuallyPlaying() {
-        try {
-            return player != null && prepared && player.isPlaying();
-        } catch (IllegalStateException error) {
-            return false;
-        }
+        return player != null && prepared && player.isPlaying();
     }
 
     private long getPositionMs() {
-        try {
-            if (player != null && prepared) {
-                return Math.max(0L, player.getCurrentPosition());
-            }
-        } catch (IllegalStateException ignored) {
-            // Fall through to stored position.
+        if (player != null && prepared) {
+            return Math.max(0L, player.getCurrentPosition());
         }
         return currentTrack == null ? 0L : currentTrack.positionMs;
     }
 
     private long getDurationMs() {
-        try {
-            if (player != null && prepared) {
-                return Math.max(0L, player.getDuration());
-            }
-        } catch (IllegalStateException ignored) {
-            // Fall through to stored duration.
+        if (player != null && prepared) {
+            return Math.max(0L, player.getDuration());
         }
         return currentTrack == null ? 0L : currentTrack.durationMs;
     }
@@ -544,7 +521,6 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
                 }
             }
         } catch (SecurityException ignored) {
-            // Playback should still work if the user denies notification permission.
         }
     }
 
@@ -576,11 +552,6 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
             .addAction(android.R.drawable.ic_media_ff, "+10", servicePendingIntent(ACTION_SEEK_RELATIVE, SEEK_SMALL_STEP_MS, 4))
             .addAction(android.R.drawable.ic_media_ff, "+30", servicePendingIntent(ACTION_SEEK_RELATIVE, SEEK_LARGE_STEP_MS, 5));
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && mediaSession != null) {
-            builder.setStyle(new Notification.MediaStyle()
-                .setMediaSession(mediaSession.getSessionToken())
-                .setShowActionsInCompactView(1, 2, 3));
-        }
         return builder.build();
     }
 

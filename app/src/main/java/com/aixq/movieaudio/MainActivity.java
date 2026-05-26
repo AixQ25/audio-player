@@ -52,7 +52,7 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_BACKUP = 1004;
     private static final int REQUEST_RESTORE = 1005;
     private static final long UI_TICK_MS = 200L;
-    private static final long DEFAULT_SUBTITLE_OFFSET_MS = 900L;
+    private static final long DEFAULT_SUBTITLE_OFFSET_MS = 0L;
     private static final int SUBTITLE_VISIBLE_RANGE = 3;
     private static final int COLOR_BG = 0xFF050504;
     private static final int COLOR_SCREEN = 0xFF0B0B09;
@@ -1021,6 +1021,7 @@ public final class MainActivity extends Activity {
                 }
                 track.subtitleUri = uri.toString();
                 track.subtitleName = displayName(uri);
+                track.subtitleOffsetMs = DEFAULT_SUBTITLE_OFFSET_MS;
                 track.updatedAt = System.currentTimeMillis();
                 store.upsert(track);
                 subtitleCues = cues;
@@ -1070,7 +1071,7 @@ public final class MainActivity extends Activity {
         if (isPlaying) {
             sendService(new Intent(this, PlaybackService.class).setAction(PlaybackService.ACTION_PAUSE), false);
         } else {
-            loadTrack(track.id, true);
+            sendService(new Intent(this, PlaybackService.class).setAction(PlaybackService.ACTION_PLAY), false);
         }
     }
 

@@ -8,6 +8,10 @@ $JavaHome = "D:\Softwear\Android Studio\jbr"
 $BuildTools = Join-Path $SdkRoot "build-tools\37.0.0"
 $PlatformJar = Join-Path $SdkRoot "platforms\android-36.1\android.jar"
 
+$LibsDir = Join-Path $ProjectRoot "libs"
+$LibJars = @(Get-ChildItem -Path $LibsDir -Filter *.jar -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+$Classpath = (@($PlatformJar) + $LibJars) -join ";"
+
 $env:ANDROID_HOME = $SdkRoot
 $env:ANDROID_SDK_ROOT = $SdkRoot
 $env:JAVA_HOME = $JavaHome
@@ -96,9 +100,11 @@ $JavaFiles = @(
 
 $JavacArgsFile = Join-Path $BuildDir "javac-sources.txt"
 $JavaFiles | ForEach-Object { '"' + ($_.Replace("\", "/")) + '"' } | Set-Content -LiteralPath $JavacArgsFile -Encoding ASCII
-Invoke-Tool $Javac @("-encoding", "UTF-8", "-source", "17", "-target", "17", "-classpath", $PlatformJar, "-d", $ClassesDir, "@$JavacArgsFile")
+Invoke-Tool $Javac @("-encoding", "UTF-8", "-source", "17", "-target", "17", "-classpath", $Classpath, "-d", $ClassesDir, "@$JavacArgsFile")
 Invoke-Tool $JarTool @("--create", "--file", $ClassesJar, "-C", $ClassesDir, ".")
-Invoke-Tool $D8 @("--lib", $PlatformJar, "--output", $DexDir, $ClassesJar)
+$D8Inputs = @($ClassesJar) + $LibJars
+$D8Args = @("--lib", $PlatformJar, "--output", $DexDir) + $D8Inputs
+Invoke-Tool $D8 $D8Args
 
 Copy-Item -LiteralPath $UnsignedApk -Destination $UnsignedDexApk -Force
 Add-Type -AssemblyName System.IO.Compression
