@@ -552,6 +552,12 @@ public final class PlaybackService extends Service implements AudioManager.OnAud
             .addAction(android.R.drawable.ic_media_ff, "+10", servicePendingIntent(ACTION_SEEK_RELATIVE, SEEK_SMALL_STEP_MS, 4))
             .addAction(android.R.drawable.ic_media_ff, "+30", servicePendingIntent(ACTION_SEEK_RELATIVE, SEEK_LARGE_STEP_MS, 5));
 
+        if (mediaSession != null) {
+            builder.setStyle(new Notification.MediaStyle()
+                .setMediaSession(mediaSession.getSessionToken())
+                .setShowActionsInCompactView(1, 2, 3));
+        }
+
         return builder.build();
     }
 
